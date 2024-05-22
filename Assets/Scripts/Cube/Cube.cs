@@ -1,9 +1,10 @@
-using System;
 using System.Collections;
 using UnityEngine;
 using DG.Tweening;
 using System.Threading;
 using System.Threading.Tasks;
+using DG.Tweening.Core;
+using DG.Tweening.Plugins.Options;
 
 public class Cube : MonoBehaviour
 {
@@ -12,6 +13,7 @@ public class Cube : MonoBehaviour
     private new Rigidbody rigidbody;
     private CancellationTokenSource cancellationTokenSource;
     private Color defaultColor;
+    private Tween tweenCoroutine;
     
     private void Awake()
     {
@@ -22,7 +24,11 @@ public class Cube : MonoBehaviour
     #region Coroutine
     public IEnumerator MoveCoroutine(float duration)
     {
-        yield return rigidbody.transform.DOMoveZ(finalPositionZ, duration)!.WaitForCompletion();
+        tweenCoroutine = rigidbody.transform.DOMoveZ(finalPositionZ, duration);
+        yield return tweenCoroutine.WaitForCompletion();
+
+        // Старый вариант (при уничтожении объекта DOTween кидает Warning)
+        //yield return rigidbody.transform.DOMoveZ(finalPositionZ, duration).WaitForCompletion();
     }
     #endregion
     
@@ -30,10 +36,20 @@ public class Cube : MonoBehaviour
     public async Task MoveAsyncStart(float duration)
     {
         cancellationTokenSource = new CancellationTokenSource();  
-
         CancellationToken cancellationToken = cancellationTokenSource.Token;
         
-        await rigidbody.transform.DOMoveZ(finalPositionZ, duration).AsyncWaitForCompletion();       
+        TweenerCore<Vector3, Vector3, VectorOptions> tweenAsync = rigidbody.transform.DOMoveZ(finalPositionZ, duration);
+        var task = tweenAsync.AsyncWaitForCompletion();
+        
+        await Task.WhenAny(task, Task.Delay(Timeout.Infinite, cancellationToken));
+        if (cancellationToken.IsCancellationRequested)
+        {
+            tweenAsync.Kill();
+        }
+
+        // Старый вариант (при уничтожении объекта DOTween кидает Warning)
+        //await rigidbody.transform.DOMoveZ(finalPositionZ, duration).AsyncWaitForCompletion(); 
+
         cancellationToken.ThrowIfCancellationRequested();
     }
     #endregion
@@ -45,12 +61,17 @@ public class Cube : MonoBehaviour
     }
 
     private void OnDestroy()
-    {
+    { 
+        if (tweenCoroutine != null && tweenCoroutine.active) 
+        {
+            tweenCoroutine.Kill();
+        }
+        
         if (cancellationTokenSource != null)
         {
             cancellationTokenSource.Cancel();
             cancellationTokenSource.Dispose();
-        }
+        }    
     } 
 
     public void OnMouseEnter()
